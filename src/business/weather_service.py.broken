@@ -1,0 +1,432 @@
+# -*- coding: utf-8 -*-
+"""
+Weather service for Sky Globe application.
+Handles weather data retrieval, processing, and caching from OpenWeatherMap API.
+"""
+
+import streamlit as st
+from datetime import datetime, timezone
+from typing import Optional, Dict, List, Any
+import logging
+
+from src.data.api_client import APIClient, APIError, RateLimitError
+from src.data.data_models import WeatherData, CityInfo
+from src.data.cache_manager import get_cache_manager
+from src.business.time_service import TimeService
+
+
+class WeatherService:
+    """
+    Service for weather data management and processing.
+    Integrates with OpenWeatherMap API and provides caching.
+    """
+    
+    def __init__(self):
+        """Initialize weather service."""
+        self.api_client = APIClient()
+        self.cache_manager = get_cache_manager()
+        self.time_service = TimeService()
+        self.logger = logging.getLogger(__name__)
+        
+        # Statistics tracking
+        self.stats = {
+            'api_calls': 0,
+            'cache_hits': 0,
+            'errors': 0
+        }
+    
+    def get_current_weather(self, city_name: str, country_code: Optional[str] = None) -> Optional[WeatherData]:
+        """
+        Get current weather data for a city.
+        
+        Args:
+            city_name: Name of the city
+            country_code: Optional 2-letter country code
+            
+        Returns:
+            WeatherData object or None if failed
+        """
+        # Generate cache key
+        cache_key = f"{city_name}_{country_code or 'none'}"
+        
+        # Check cache first
+        cached_weather = self.cache_manager.get('weather', cache_key)
+        if cached_weather is not None:
+            self.stats['cache_hits'] += 1
+            self.logger.debug(f"Weather cache hit for {city_name}")
+            return cached_weather
+        
+        try:
+            # Make API call
+            api_response = self.api_client.get_current_weather(city_name, country_code)
+            self.stats['api_calls'] += 1
+            
+            if api_response is None:
+                self.stats['errors'] += 1
+                return None
+            
+            # Parse API response into WeatherData object
+            weather_data = self._parse_weather_response(api_response)
+            
+            if weather_data:
+                # Cache the result
+                self.cache_manager.set('weather', weather_data, cache_key)
+                self.logger.info(f"Weather data retrieved for {city_name}")
+                return weather_data
+            else:
+                self.stats['errors'] += 1
+                return None
+                
+        except (APIError, RateLimitError) as e:
+            self.logger.error(f"API error retrieving weather for {city_name}: {str(e)}")
+            self.stats['errors'] += 1
+            return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error retrieving weather for {city_name}: {str(e)}")
+            self.stats['errors'] += 1
+            return None
+    
+    def get_weather_by_coordinates(self, latitude: float, longitude: float) -> Optional[WeatherData]:
+        """
+        Get current weather data by coordinates.
+        
+        Args:
+            latitude: Latitude coordinate
+            longitude: Longitude coordinate
+            
+        Returns:
+            WeatherData object or None if failed
+        """
+        # Generate cache key
+        cache_key = f"coord_{latitude:.4f}_{longitude:.4f}"
+        
+        # Check cache first
+        cached_weather = self.cache_manager.get('weather', cache_key)
+        if cached_weather is not None:
+            self.stats['cache_hits'] += 1
+            self.logger.debug(f"Weather cache hit for coordinates ({latitude}, {longitude})")
+            return cached_weather
+        
+        try:
+            # Make API call
+            api_response = self.api_client.get_weather_by_coordinates(latitude, longitude)
+            self.stats['api_calls'] += 1
+            
+            if api_response is None:
+                self.stats['errors'] += 1
+                return None
+            
+            # Parse API response into WeatherData object
+            weather_data = self._parse_weather_response(api_response)
+            
+            if weather_data:
+                # Cache the result
+                self.cache_manager.set('weather', weather_data, cache_key)
+                self.logger.info(f"Weather data retrieved for coordinates ({latitude}, {longitude})")
+                return weather_data
+            else:
+                self.stats['errors'] += 1
+                return None
+                
+        except (APIError, RateLimitError) as e:
+            self.logger.error(f"API error retrieving weather for coordinates: {str(e)}")
+            self.stats['errors'] += 1
+            return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error retrieving weather for coordinates: {str(e)}")
+            self.stats['errors'] += 1
+            return None
+    
+    def get_weather_for_city(self, city_info: CityInfo) -> Optional[WeatherData]:
+        """
+        Get weather data for a CityInfo object.
+        
+        Args:
+            city_info: CityInfo object
+            
+        Returns:
+            WeatherData object or None if failed
+        """
+        # Try by city name first (more accurate for well-known cities)
+        weather_data = self.get_current_weather(city_info.name_en, city_info.country_code)
+        
+        # Fallback to coordinates if city name fails
+        if weather_data is None:
+            weather_data = self.get_weather_by_coordinates(city_info.latitude, city_info.longitude)
+        
+        return weather_data
+    
+    def get_multiple_cities_weather(self, cities: List[CityInfo]) -> Dict[int, Optional[WeatherData]]:
+        """
+        Get weather data for multiple cities.
+        
+        Args:
+            cities: List of CityInfo objects
+            
+        Returns:
+            Dictionary mapping city ID to WeatherData (or None if failed)
+        """
+        results = {}
+        
+        for city in cities:
+            try:
+                weather_data = self.get_weather_for_city(city)
+                results[city.id] = weather_data
+                
+                # Add small delay to respect API rate limits
+                if weather_data is not None and not self._was_cached():
+                    import time
+                    time.sleep(0.1)  # 100ms delay between API calls
+                    
+            except Exception as e:
+                self.logger.error(f"Failed to get weather for city {city.name_en}: {str(e)}")
+                results[city.id] = None
+        
+        return results
+    
+    def _parse_weather_response(self, api_response: Dict[str, Any]) -> Optional[WeatherData]:
+        """
+        Parse OpenWeatherMap API response into WeatherData object.
+        
+        Args:
+            api_response: Raw API response dictionary
+            
+        Returns:
+            WeatherData object or None if parsing failed
+        """
+        try:
+            return WeatherData.from_openweather_api(api_response)
+        except Exception as e:
+            self.logger.error(f"Failed to parse weather response: {str(e)}")
+            return None
+    
+    def _was_cached(self) -> bool:
+        """
+        Check if the last request was served from cache.
+        This is a simple heuristic based on recent cache hit increase.
+        
+        Returns:
+            True if likely cached, False otherwise
+        """
+        return self.stats['cache_hits'] > 0
+    
+    def get_5day_forecast(self, city_name: str, country_code: Optional[str] = None) -> Optional[List[Dict[str, Any]]]:
+        """
+        Get 5-day weather forecast for a city.
+        
+        Args:
+            city_name: Name of the city
+            country_code: Optional 2-letter country code
+            
+        Returns:
+            List of forecast data or None if failed
+        """
+        # Generate cache key
+        cache_key = f"forecast_{city_name}_{country_code or 'none'}"
+        
+        # Check cache first (forecast cached for longer - 1 hour)
+        cached_forecast = self.cache_manager.get('forecast', cache_key)
+        if cached_forecast is not None:
+            self.logger.debug(f"Forecast cache hit for {city_name}")
+            return cached_forecast
+        
+        try:
+            # Make API call
+            api_response = self.api_client.get_5day_forecast(city_name, country_code)
+            
+            if api_response is None:
+                return None
+            
+            # Parse forecast data
+            forecast_list = []
+            for item in api_response.get('list', []):
+                try:
+                    forecast_item = {
+                        'datetime': datetime.fromtimestamp(item['dt'], tz=timezone.utc),
+                        'temperature': item['main']['temp'],
+                        'feels_like': item['main']['feels_like'],
+                        'humidity': item['main']['humidity'],
+                        'pressure': item['main']['pressure'],
+                        'weather_main': item['weather'][0]['main'],
+                        'weather_description': item['weather'][0]['description'],
+                        'weather_icon': item['weather'][0]['icon'],
+                        'wind_speed': item.get('wind', {}).get('speed', 0),
+                        'wind_direction': item.get('wind', {}).get('deg', 0),
+                        'clouds': item.get('clouds', {}).get('all', 0),
+                        'pop': item.get('pop', 0)  # Probability of precipitation
+                    }
+                    forecast_list.append(forecast_item)
+                except Exception as e:
+                    self.logger.warning(f"Failed to parse forecast item: {str(e)}")
+                    continue
+            
+            if forecast_list:
+                # Cache the result for 1 hour
+                self.cache_manager.set('forecast', forecast_list, cache_key)
+                self.logger.info(f"Forecast data retrieved for {city_name}")
+                return forecast_list
+            
+            return None
+            
+        except (APIError, RateLimitError) as e:
+            self.logger.error(f"API error retrieving forecast for {city_name}: {str(e)}")
+            return None
+        except Exception as e:
+            self.logger.error(f"Unexpected error retrieving forecast for {city_name}: {str(e)}")
+            return None
+    
+    def get_weather_alerts(self, latitude: float, longitude: float) -> List[Dict[str, Any]]:
+        """
+        Get weather alerts for coordinates (if available in the API plan).
+        
+        Args:
+            latitude: Latitude coordinate
+            longitude: Longitude coordinate
+            
+        Returns:
+            List of weather alerts
+        """
+        # Note: Weather alerts require a paid OpenWeatherMap plan
+        # This is a placeholder for future implementation
+        self.logger.info("Weather alerts feature requires paid API plan")
+        return []
+    
+    def format_weather_display(self, weather_data: WeatherData, temp_unit: str = "C", wind_unit: str = "ms") -> Dict[str, str]:
+        """
+        Format weather data for display in UI.
+        
+        Args:
+            weather_data: WeatherData object
+            temp_unit: Temperature unit ('C' or 'F')
+            wind_unit: Wind speed unit ('ms', 'kmh', 'mph')
+            
+        Returns:
+            Formatted weather data dictionary
+        """
+        try:
+            display_data = weather_data.to_display_dict(temp_unit, wind_unit)
+            
+            # Add formatted strings for UI display
+            formatted = {
+                'temperature_display': f"{display_data['temperature']}{display_data['temperature_unit']}",
+                'feels_like_display': f"S {display_data['feels_like']}{display_data['temperature_unit']}",
+                'humidity_display': f"� {display_data['humidity']}%",
+                'pressure_display': f"' {display_data['pressure']} hPa",
+                'wind_display': f"� {display_data['wind_speed']} {display_data['wind_unit']}",
+                'visibility_display': f"�L {display_data['visibility']/1000:.1f} km",
+                'weather_display': display_data['weather'].title(),
+                'time_display': display_data['local_time'],
+                'sunrise_display': display_data['sunrise'],
+                'sunset_display': display_data['sunset'],
+                'updated_display': display_data['updated_at']
+            }
+            
+            # Add weather condition emoji
+            weather_emoji = self._get_weather_emoji(weather_data.weather_icon)
+            formatted['weather_emoji'] = weather_emoji
+            formatted['weather_with_emoji'] = f"{weather_emoji} {formatted['weather_display']}"
+            
+            return formatted
+            
+        except Exception as e:
+            self.logger.error(f"Failed to format weather display: {str(e)}")
+            return {}
+    
+    def _get_weather_emoji(self, icon_code: str) -> str:
+        """
+        Get emoji representation of weather condition.
+        
+        Args:
+            icon_code: OpenWeatherMap icon code
+            
+        Returns:
+            Weather emoji string
+        """
+        emoji_map = {
+            '01d': ' ',   # clear sky day
+            '01n': '<',   # clear sky night
+            '02d': '�',   # few clouds day
+            '02n': '',   # few clouds night
+            '03d': '',   # scattered clouds
+            '03n': '',   # scattered clouds
+            '04d': '',   # broken clouds
+            '04n': '',   # broken clouds
+            '09d': '<'',   # shower rain
+            '09n': '<'',   # shower rain
+            '10d': '<&',   # rain day
+            '10n': '<'',   # rain night
+            '11d': '�',   # thunderstorm
+            '11n': '�',   # thunderstorm
+            '13d': 'D',   # snow
+            '13n': 'D',   # snow
+            '50d': '<+',   # mist
+            '50n': '<+',   # mist
+        }
+        
+        return emoji_map.get(icon_code, '<$')  # default
+    
+    def test_api_connection(self) -> bool:
+        """
+        Test API connection and configuration.
+        
+        Returns:
+            True if API is working, False otherwise
+        """
+        try:
+            return self.api_client.test_api_connection()
+        except Exception as e:
+            self.logger.error(f"API connection test failed: {str(e)}")
+            return False
+    
+    def get_service_statistics(self) -> Dict[str, Any]:
+        """
+        Get service usage statistics.
+        
+        Returns:
+            Dictionary with service statistics
+        """
+        api_stats = self.api_client.get_request_stats()
+        
+        total_requests = self.stats['api_calls'] + self.stats['cache_hits']
+        cache_hit_rate = (self.stats['cache_hits'] / total_requests * 100) if total_requests > 0 else 0
+        
+        return {
+            'weather_service': {
+                'api_calls': self.stats['api_calls'],
+                'cache_hits': self.stats['cache_hits'],
+                'errors': self.stats['errors'],
+                'total_requests': total_requests,
+                'cache_hit_rate_percent': round(cache_hit_rate, 2)
+            },
+            'api_client': api_stats,
+            'cache': self.cache_manager.get_stats()
+        }
+    
+    def clear_cache(self) -> int:
+        """
+        Clear all weather-related caches.
+        
+        Returns:
+            Number of cache entries cleared
+        """
+        weather_cleared = self.cache_manager.clear_by_type('weather')
+        forecast_cleared = self.cache_manager.clear_by_type('forecast')
+        
+        total_cleared = weather_cleared + forecast_cleared
+        self.logger.info(f"Cleared {total_cleared} weather cache entries")
+        
+        return total_cleared
+    
+    def invalidate_city_cache(self, city_name: str, country_code: Optional[str] = None) -> bool:
+        """
+        Invalidate cache for specific city.
+        
+        Args:
+            city_name: City name
+            country_code: Optional country code
+            
+        Returns:
+            True if cache was invalidated
+        """
+        cache_key = f"{city_name}_{country_code or 'none'}"
+        return self.cache_manager.delete('weather', cache_key)

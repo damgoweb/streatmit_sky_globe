@@ -1,0 +1,21 @@
+id,name_en,name_ja,country_code,country_en,country_ja,latitude,longitude,timezone,continent,population
+1,Tokyo,東京,JP,Japan,日本,35.6895,139.6917,Asia/Tokyo,Asia,13929280
+2,London,ロンドン,GB,United Kingdom,イギリス,51.5074,-0.1278,Europe/London,Europe,8982000
+3,New York,ニューヨーク,US,United States,アメリカ,40.7128,-74.0060,America/New_York,North America,8336817
+4,Paris,パリ,FR,France,フランス,48.8566,2.3522,Europe/Paris,Europe,2161000
+5,Shanghai,上海,CN,China,中国,31.2304,121.4737,Asia/Shanghai,Asia,24256800
+6,Los Angeles,ロサンゼルス,US,United States,アメリカ,34.0522,-118.2437,America/Los_Angeles,North America,3971883
+7,Berlin,ベルリン,DE,Germany,ドイツ,52.5200,13.4050,Europe/Berlin,Europe,3669491
+8,Sydney,シドニー,AU,Australia,オーストラリア,-33.8688,151.2093,Australia/Sydney,Oceania,5312163
+9,Mumbai,ムンバイ,IN,India,インド,19.0760,72.8777,Asia/Kolkata,Asia,20411274
+10,São Paulo,サンパウロ,BR,Brazil,ブラジル,-23.5505,-46.6333,America/Sao_Paulo,South America,12325232
+11,Cairo,カイロ,EG,Egypt,エジプト,30.0444,31.2357,Africa/Cairo,Africa,10230350
+12,Moscow,モスクワ,RU,Russia,ロシア,55.7558,37.6173,Europe/Moscow,Europe,12506468
+13,Bangkok,バンコク,TH,Thailand,タイ,13.7563,100.5018,Asia/Bangkok,Asia,10156320
+14,Buenos Aires,ブエノスアイレス,AR,Argentina,アルゼンチン,-34.6037,-58.3816,America/Argentina/Buenos_Aires,South America,2890151
+15,Seoul,ソウル,KR,South Korea,韓国,37.5665,126.9780,Asia/Seoul,Asia,9720846
+16,Istanbul,イスタンブール,TR,Turkey,トルコ,41.0082,28.9784,Europe/Istanbul,Europe,15462452
+17,Jakarta,ジャカルタ,ID,Indonesia,インドネシア,-6.2088,106.8456,Asia/Jakarta,Asia,10770487
+18,Manila,マニラ,PH,Philippines,フィリピン,14.5995,120.9842,Asia/Manila,Asia,13923452
+19,Mexico City,メキシコシティ,MX,Mexico,メキシコ,19.4326,-99.1332,America/Mexico_City,North America,9209944
+20,Delhi,デリー,IN,India,インド,28.7041,77.1025,Asia/Kolkata,Asia,32941308

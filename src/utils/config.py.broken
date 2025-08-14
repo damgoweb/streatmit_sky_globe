@@ -1,0 +1,138 @@
+# -*- coding: utf-8 -*-
+"""
+Configuration management module for Sky Globe application.
+Handles environment settings, API keys, and application constants.
+"""
+
+import os
+import streamlit as st
+from typing import Dict, Any, Optional
+from pathlib import Path
+
+
+class Config:
+    """Configuration manager for Sky Globe application."""
+    
+    # Environment configurations
+    ENVIRONMENTS = {
+        'development': {
+            'debug': True,
+            'cache_ttl_weather': 60,  # 1 minute for development
+            'cache_ttl_geocoding': 300,  # 5 minutes
+            'max_requests_per_hour': 100,
+            'log_level': 'DEBUG'
+        },
+        'production': {
+            'debug': False,
+            'cache_ttl_weather': 600,  # 10 minutes
+            'cache_ttl_geocoding': 3600,  # 1 hour
+            'max_requests_per_hour': 900,
+            'log_level': 'INFO'
+        }
+    }
+    
+    # API endpoints
+    OPENWEATHERMAP_BASE_URL = "https://api.openweathermap.org/data/2.5"
+    OPENWEATHERMAP_GEOCODING_URL = "https://api.openweathermap.org/geo/1.0"
+    
+    # Application constants
+    DEFAULT_CITY = "Tokyo"
+    MAX_SEARCH_RESULTS = 10
+    MIN_SEARCH_LENGTH = 2
+    
+    # File paths
+    PROJECT_ROOT = Path(__file__).parent.parent.parent
+    DATA_DIR = PROJECT_ROOT / "data"
+    ASSETS_DIR = PROJECT_ROOT / "assets"
+    
+    def __init__(self):
+        """Initialize configuration."""
+        self.environment = os.getenv('ENVIRONMENT', 'development')
+        self._config = self.ENVIRONMENTS.get(
+            self.environment, 
+            self.ENVIRONMENTS['development']
+        )
+    
+    @property
+    def debug_mode(self) -> bool:
+        """Get debug mode setting."""
+        return self._config.get('debug', False)
+    
+    @property
+    def cache_ttl_weather(self) -> int:
+        """Get weather data cache TTL in seconds."""
+        return self._config.get('cache_ttl_weather', 600)
+    
+    @property
+    def cache_ttl_geocoding(self) -> int:
+        """Get geocoding cache TTL in seconds."""
+        return self._config.get('cache_ttl_geocoding', 3600)
+    
+    @property
+    def max_requests_per_hour(self) -> int:
+        """Get maximum API requests per hour."""
+        return self._config.get('max_requests_per_hour', 900)
+    
+    @property
+    def log_level(self) -> str:
+        """Get logging level."""
+        return self._config.get('log_level', 'INFO')
+    
+    def get_api_key(self, service: str) -> str:
+        """
+        Get API key for specified service.
+        
+        Args:
+            service: Service name (e.g., 'openweathermap')
+            
+        Returns:
+            API key string
+            
+        Raises:
+            KeyError: If API key not found
+        """
+        try:
+            return st.secrets["api_keys"][service]
+        except KeyError:
+            if self.debug_mode:
+                st.warning(f"  API key for {service} not found in secrets.toml")
+            raise KeyError(f"API key for {service} not configured")
+    
+    def get_openweathermap_api_key(self) -> str:
+        """Get OpenWeatherMap API key."""
+        return self.get_api_key("openweathermap")
+    
+    def get_cities_csv_path(self) -> Path:
+        """Get path to cities CSV file."""
+        return self.DATA_DIR / "cities.csv"
+    
+    def get_countries_csv_path(self) -> Path:
+        """Get path to countries CSV file."""
+        return self.DATA_DIR / "countries.csv"
+    
+    def get_weather_icons_path(self) -> Path:
+        """Get path to weather icons directory."""
+        return self.ASSETS_DIR / "weather_icons"
+    
+    def to_dict(self) -> Dict[str, Any]:
+        """Convert configuration to dictionary."""
+        return {
+            'environment': self.environment,
+            'debug_mode': self.debug_mode,
+            'cache_ttl_weather': self.cache_ttl_weather,
+            'cache_ttl_geocoding': self.cache_ttl_geocoding,
+            'max_requests_per_hour': self.max_requests_per_hour,
+            'openweathermap_base_url': self.OPENWEATHERMAP_BASE_URL,
+            'default_city': self.DEFAULT_CITY
+        }
+    
+    @classmethod
+    def get_instance(cls) -> 'Config':
+        """Get singleton instance of Config."""
+        if not hasattr(cls, '_instance'):
+            cls._instance = cls()
+        return cls._instance
+
+
+# Global configuration instance
+config = Config.get_instance()
